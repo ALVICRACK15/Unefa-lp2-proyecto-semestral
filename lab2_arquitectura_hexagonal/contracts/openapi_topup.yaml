@@ -1,1 +1,202 @@
+openapi: 3.1.0
 
+info:
+  title: Pasarela Convergente de Recarga TelCo/FinTech
+  version: 1.0.0
+  description: Contrato normativo para recargas idempotentes con montos en centavos enteros.
+servers:
+  - url: https://api.topup.local/v1
+    description: Servidor de referencia v1
+paths:
+  /v1/topups:
+    post:
+      summary: Crear y ejecutar una recarga idempotente
+      operationId: createTopup
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Llave única en formato UUID v4 para prevenir cobros duplicados.
+          schema:
+            type: string
+            format: uuid
+            pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTopupRequest'
+      responses:
+        '201':
+          description: Transacción de recarga creada y procesada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TopupTransaction'
+        '400':
+          description: Solicitud mal formada o cabecera Idempotency-Key inválida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Conflicto por reutilización de llave con carga útil distinta o estado incompatible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Regla de dominio incumplida (formato E.164 o monto inválido)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/topups/{transactionId}:
+    put:
+      summary: Registrar o actualizar una recarga de forma idempotente por ID
+      operationId: upsertTopupById
+      parameters:
+        - $ref: '#/components/parameters/TransactionIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PutTopupRequest'
+      responses:
+        '200':
+          description: Transacción existente actualizada o confirmada de forma idempotente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TopupTransaction'
+        '201':
+          description: Nueva transacción creada mediante PUT idempotente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TopupTransaction'
+        '400':
+          description: Parámetro o cuerpo inválido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Conflicto de estado o concurrencia
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Error de validación de dominio
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    get:
+      summary: Consultar una transacción de recarga por identificador
+      operationId: getTopupById
+      parameters:
+        - $ref: '#/components/parameters/TransactionIdParam'
+      responses:
+        '200':
+          description: Transacción encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TopupTransaction'
+        '400':
+          description: Identificador con formato inválido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+components:
+  parameters:
+    TransactionIdParam:
+      name: transactionId
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 64
+  schemas:
+    CreateTopupRequest:
+      type: object
+      required:
+        - msisdn
+        - amountCents
+      additionalProperties: false
+      properties:
+        msisdn:
+          type: string
+          pattern: '^\+[1-9]\d{6,14}$'
+          example: '+584141234567'
+        amountCents:
+          type: integer
+          format: int64
+          minimum: 100
+          example: 500
+    PutTopupRequest:
+      type: object
+      required:
+        - idempotencyKey
+        - msisdn
+        - amountCents
+      additionalProperties: false
+      properties:
+        idempotencyKey:
+          type: string
+          format: uuid
+          pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$'
+        msisdn:
+          type: string
+          pattern: '^\+[1-9]\d{6,14}$'
+        amountCents:
+          type: integer
+          format: int64
+          minimum: 100
+    TopupTransaction:
+      type: object
+      required:
+        - id
+        - idempotencyKey
+        - msisdn
+        - amountCents
+        - status
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+        idempotencyKey:
+          type: string
+          format: uuid
+        msisdn:
+          type: string
+          pattern: '^\+[1-9]\d{6,14}$'
+        amountCents:
+          type: integer
+          format: int64
+          minimum: 100
+        status:
+          type: string
+          enum:
+            - PENDIENTE
+            - APROBADA
+            - RECHAZADA
+        rejectionReason:
+          type: string
+    ErrorResponse:
+      type: object
+      required:
+        - code
+        - message
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+        message:
+          type: string
